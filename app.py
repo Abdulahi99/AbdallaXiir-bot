@@ -43,7 +43,7 @@ Awoodahaaga qoto dheer:
 3. Baarista Coin-nada Mustaqbalka & Long-Term: Falanqee aasaaska mashruuca (utility, adoption, tokenomics/unlocks, catalysts), khataraha, iyo istaraatijiyadda soogalitaanka (sida DCA ama qaybsashada meelaha soo laabashada), adigoo mar walba xusaya in maalgashigu leeyahay khatar.
 4. Trade Execution Plan: Haddii la dalbado qorshe trade, qor Pair, Side, Entry, SL, TP, iyo Risk %, adigoo xusaya haddii API-ga exchange-ka uusan weli toos ugu xirnayn.
 5. Luqadaha (Af-Soomaali, Swedish, English): Turjumaad sax ah, sharrax naxwe/ereyo, iyo isbarbardhig macne oo caqli leh.
-6. Wararka & Arrinta Guud: Dulmar cad, saameynta dhacdada, iyo kala saaridda xogta la xaqiijiyay iyo arrimaha isbeddeli kara.
+6. Wararka WatcherGuru & Suuqyada: U qor wararka si nidaamsan (Dulmar Warka Af-Soomaali, Saamaynta Suuqa/Crypto, iyo Xogta La Xaqiijiyay vs Waxa Isbeddeli Kara).
 7. Su'aalaha Guud, IT & Farsamada: Ka jawaab su'aal kasta si deggan, faahfaahsan, oo xallin leh.
 """
 
@@ -107,15 +107,9 @@ def _is_quota_or_not_found(err_text):
     return any(k in err_text for k in markers)
 
 
-def generate_ai_reply(user_text):
+def generate_ai_reply(prompt_text):
     global _active_model
     client = get_gemini_client()
-    hook_note = execute_trade_hook(user_text)
-
-    prompt = user_text
-    if hook_note:
-        prompt = f"{user_text}\n\n[System Note: {hook_note}]"
-
     skip_models = set()
     last_error = None
 
@@ -128,7 +122,7 @@ def generate_ai_reply(user_text):
             try:
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=prompt,
+                    contents=prompt_text,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
                         temperature=0.35,
@@ -154,6 +148,22 @@ def generate_ai_reply(user_text):
     raise RuntimeError(f"All models failed. Last error: {repr(last_error)}")
 
 
+def _extract_forward_source(message):
+    forward_origin = message.get("forward_origin") or {}
+    origin_type = forward_origin.get("type")
+    if origin_type == "channel":
+        chat_obj = forward_origin.get("chat") or {}
+        return chat_obj.get("username") or chat_obj.get("title") or "Channel"
+    if origin_type == "user":
+        sender = forward_origin.get("sender_user") or {}
+        return sender.get("username") or sender.get("first_name") or "User"
+
+    fwd_from_chat = message.get("forward_from_chat") or {}
+    if fwd_from_chat:
+        return fwd_from_chat.get("username") or fwd_from_chat.get("title") or "Channel"
+    return None
+
+
 @app.route("/", methods=["GET"])
 def home():
     return "AbdallaXIIR-bot is live", 200
@@ -165,7 +175,7 @@ def webhook():
     message = data.get("message") or data.get("edited_message") or {}
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
-    text = message.get("text")
+    text = message.get("text") or message.get("caption")
 
     if not chat_id or not text:
         return jsonify({"ok": True}), 200
@@ -175,18 +185,45 @@ def webhook():
         send_telegram_message(
             chat_id,
             "Ku soo dhawoow @AbdallaXiir_bot! Waxaan kaa caawin karaa wax kasta oo nidaamsan oo dhameystiran:\n"
+            "• WatcherGuru & Wararka Suuqyada: I soo forward garee warka WatcherGuru ama isticmaal /wg [qoraalka] si aan kuugu soo saaro Af-Soomaali nidaamsan\n"
             "• Falanqaynta Crypto, Stocks, Forex & suuqyada kale\n"
             "• Wave Concept Trading (Entry, Stop Loss & TP1/TP2)\n"
             "• Baarista coin-nada mustaqbalka leh & istaraatijiyadda long-term\n"
             "• Luqadaha Af-Soomaali, Swedish & English oo si qoto dheer loo sharraxo\n"
-            "• Wararka (News) oo nidaamsan\n"
             "• Su'aalaha guud, IT/farsamada, iyo xallinta dhibaatooyinka\n\n"
-            "I weydii su'aashaada hadda!",
+            "I weydii su'aashaada ama i soo forward garee warka hadda!",
         )
         return jsonify({"ok": True}), 200
 
+    forward_source = _extract_forward_source(message)
+    is_wg_command = text.lower().startswith("/wg")
+
+    if is_wg_command:
+        news_body = text[3:].strip()
+        if not news_body:
+            send_telegram_message(
+                chat_id,
+                "Fadlan ku dar qoraalka warka ka dib /wg, tusaale:\n/wg Bitcoin ETF inflows hit record high...",
+            )
+            return jsonify({"ok": True}), 200
+        prompt_to_send = (
+            "Fadlan warkan (WatcherGuru / Market News) si sax ah ugu turjun oo ugu falanqee Af-Soomaali nidaamsan "
+            "(1. Dulmar Warka, 2. Saamaynta Suuqa/Crypto, 3. Xogta La Xaqiijiyay vs Waxa Isbeddeli Kara):\n\n"
+            f"{news_body}"
+        )
+    elif forward_source:
+        prompt_to_send = (
+            f"Warkan waxaa laga soo forward gareeyay isha: {forward_source}. "
+            "Fadlan si sax ah ugu turjun oo ugu falanqee Af-Soomaali nidaamsan "
+            "(1. Dulmar Warka, 2. Saamaynta Suuqa/Crypto, 3. Xogta La Xaqiijiyay vs Waxa Isbeddeli Kara):\n\n"
+            f"{text}"
+        )
+    else:
+        hook_note = execute_trade_hook(text)
+        prompt_to_send = f"{text}\n\n[System Note: {hook_note}]" if hook_note else text
+
     try:
-        ai_text = generate_ai_reply(text)
+        ai_text = generate_ai_reply(prompt_to_send)
         send_telegram_message(chat_id, ai_text)
     except Exception as e:
         print("GEMINI_ERROR:", repr(e))
