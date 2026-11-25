@@ -84,7 +84,7 @@ def generate_ai_reply(user_text):
         prompt = f"{user_text}\n\n[Xogta Nidaamka: {hook_note}]"
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.0-flash",
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
