@@ -6,12 +6,16 @@ from google.genai import types
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN") or "").strip()
+TELEGRAM_TOKEN = (
+    os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN") or ""
+).strip()
 GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
-TRADE_EXECUTION_ENABLED = (os.environ.get("TRADE_EXECUTION_ENABLED") or "false").lower() == "true"
+TRADE_EXECUTION_ENABLED = (
+    os.environ.get("TRADE_EXECUTION_ENABLED") or "false"
+).strip().lower() == "true"
 
 _client = None
-_cached_model = None
+_working_model = None
 
 
 def get_gemini_client():
@@ -28,24 +32,18 @@ Waxaad tahay caawiye AI ah oo aad u xirfad sareeya oo loogu talagalay bot-ka Tel
 Had iyo jeer ku jawaab Af-Soomaali cad, nidaamsan, oo saaxiibtinimo leh (haddii aan si gaar ah laguu weydiisan luqad kale).
 
 Awoodahaaga asaasiga ah waa:
-1. Falanqaynta Suuqyada (Markets): Crypto, Stocks, Forex, Commodities, iyo Indices. Haddii isticmaaluhu keeno qiime, chart-xaalad, timeframe, ama su'aal suuq, u samee falanqayn nidaamsan (Trend, Key Levels, Support/Resistance, Scenarios).
+1. Falanqaynta Suuqyada (Markets): Crypto, Stocks, Forex, Commodities, iyo Indices. U samee falanqayn nidaamsan (Trend, Key Levels, Support/Resistance, Scenarios).
 2. Wave Concept Trading: U falanqee suuqa adigoo adeegsanaya qaabka hirarka (Impulse waves 1-2-3-4-5 iyo Corrective waves A-B-C). Si cad ugu sheeg:
    - Qaabka hirka (Wave count / structure) iyo kalsoonida (probability).
    - Aagga gelitaanka (Entry zone) iyo sababta.
    - Meelaha ka bixidda (Take Profit 1, TP2, ama exit signal).
    - Meesha ilaalinta / joojinta khasaaraha (Stop Loss / invalidation level).
    - Xusuusin gaaban oo maareynta khatarta (risk management) ah.
-3. Fulinta Trade-ka (Trade Execution): Haddii isticmaaluhu dalbado in trade la galo ama la xiro, u diyaari "Trade Execution Plan / Order Ticket" oo faahfaahsan (Pair/Asset, Side: Long/Short/Buy/Sell, Entry, Stop Loss, Take Profit, Risk). Haddii uusan xirneyn API-ga saxda ah ee exchange/broker-ka, u sheeg si cad in uu haysto qorshaha order-ka oo diyaar u ah in lagu xiro API-ga exchange-ka.
-4. Baarista Coin-nada Mustaqbalka (Crypto Research & Watchlist): Marka isticmaaluhu weydiiyo coin-no kici kara ama meel fiican gaari kara mustaqbalka, ha u sheegin kaliya "iibso coin hebel" iyadoo aan sabab lahayn. U sharrax:
-   - Noocyada mashaariicda leh qiime/isticmaal dhab ah (Layer-1s, Layer-2s, DeFi/infra, ama shabakado leh developer & user growth).
-   - Qodobbada kor u qaadi kara (catalysts, liquidity, ecosystem adoption) iyo khataraha jira (volatility, dilution/token unlocks, regulation).
-   - Qaabka loogu kala saaro "Long-term / Spot watch" vs "Short-term / High-risk setup", isla markaana ku dar xusuusin cad oo ku saabsan in crypto uu leeyahay khatar sare (ma aha talo maaliyadeed oo dammaanad leh).
-5. Luqadaha Swedish iyo English: Marka wax laga weydiiyo kalmado, jumlado, naxwe, ama qoraallo Swedish ama English ah, u fasir oo ugu sharrax Af-Soomaali si fudud oo dhab ah, adigoo bixinaya tusaalooyin isticmaalka maalinlaha ah.
-6. Wararka (News) oo Af-Soomaali ah: Marka isticmaaluhu weydiiyo warar (sida wararka suuqyada crypto/stocks/forex, wararka caalamka, Sweden, ama tignoolajiyada), ugu qor Af-Soomaali cad, nidaamsan, oo fudud in la akhriyo. U kala saar:
-   - Dulmar kooban oo wararka ugu muhiimsan ah (bullet points).
-   - Saamaynta ay ku yeelan karto suuqa ama arrinta la weydiiyay.
-   - Kala saaridda xogta la xaqiijiyay iyo haddii ay jiraan arrimo aan weli caddayn ama u baahan xaqiijin dheeraad ah, iyadoo aan la abuurin warar been ah.
-7. Caawinta Guud: Wax kasta oo farsamo, waxbarasho, qorshayn, ama xallin dhibaato ah, si buuxda oo faahfaahsan uga caawi.
+3. Fulinta Trade-ka (Trade Execution): Haddii isticmaaluhu dalbado in trade la galo ama la xiro, u diyaari "Trade Execution Plan / Order Ticket" oo faahfaahsan (Pair/Asset, Side: Long/Short/Buy/Sell, Entry, Stop Loss, Take Profit, Risk). Haddii uusan xirneyn API-ga exchange/broker-ka, u sheeg si cad in uu yahay qorshe order oo diyaar u ah in lagu xiro API-ga exchange-ka.
+4. Baarista Coin-nada Mustaqbalka (Crypto Research & Watchlist): Marka la weydiiyo coin-no kici kara ama meel fiican gaari kara mustaqbalka, sharrax mashaariicda leh utility dhab ah, qodobbada kor u qaadi kara (catalysts, liquidity, adoption), iyo khataraha (volatility, dilution/unlocks, regulation), adigoo ku daraya xusuusin khatarta maalgashiga.
+5. Luqadaha Swedish iyo English: U fasir oo ugu sharrax Af-Soomaali si fudud oo dhab ah, adigoo bixinaya tusaalooyin isticmaalka maalinlaha ah.
+6. Wararka (News) oo Af-Soomaali ah: Marka la weydiiyo warar (suuqyada, caalamka, Sweden, ama tignoolajiyada), ugu qor Af-Soomaali cad oo nidaamsan, adigoo kala saaraya dulmar kooban, saamaynta suurtagalka ah, iyo xogta la xaqiijiyay.
+7. Caawinta Guud: Wax kasta oo farsamo, waxbarasho, qorshayn, ama xallin dhibaato ah, si buuxda uga caawi.
 """
 
 
@@ -71,48 +69,44 @@ def execute_trade_hook(command_text):
     return f"[Trade Hook Active] Fariinta order-ka waa la diiwaangeliyay: {command_text}"
 
 
-def pick_available_model(client):
-    global _cached_model
-    if _cached_model:
-        return _cached_model
+def discover_candidate_models(client):
+    global _working_model
+    candidates = []
 
-    preferred = [
+    if _working_model:
+        candidates.append(_working_model)
+
+    defaults = [
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
         "gemini-flash-latest",
         "gemini-flash-lite-latest",
         "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro",
     ]
+    for d in defaults:
+        if d not in candidates:
+            candidates.append(d)
 
-    available_names = []
     try:
         for m in client.models.list():
-            name = getattr(m, "name", "") or ""
-            clean_name = name.replace("models/", "")
-            supported = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
-            if not supported or "generateContent" in supported or "generate_content" in supported:
-                if clean_name:
-                    available_names.append(clean_name)
-        print("AVAILABLE_MODELS:", available_names)
+            raw_name = getattr(m, "name", "") or ""
+            clean_name = raw_name.replace("models/", "").strip()
+            if not clean_name:
+                continue
+            blocked_words = ("embedding", "imagen", "veo", "aqa", "bis", "tts", "live", "audio")
+            if any(w in clean_name.lower() for w in blocked_words):
+                continue
+            if "gemini" in clean_name.lower() and clean_name not in candidates:
+                candidates.append(clean_name)
     except Exception as e:
-        print("LIST_MODELS_ERROR:", repr(e))
+        print("LIST_MODELS_WARNING:", repr(e))
 
-    for p in preferred:
-        if p in available_names:
-            _cached_model = p
-            return _cached_model
-
-    for name in available_names:
-        if "gemini" in name and "embedding" not in name and "imagen" not in name and "veo" not in name:
-            _cached_model = name
-            return _cached_model
-
-    _cached_model = "gemini-2.0-flash"
-    return _cached_model
+    return candidates
 
 
 def generate_ai_reply(user_text):
+    global _working_model
     client = get_gemini_client()
     hook_note = execute_trade_hook(user_text)
 
@@ -120,21 +114,31 @@ def generate_ai_reply(user_text):
     if hook_note:
         prompt = f"{user_text}\n\n[Xogta Nidaamka: {hook_note}]"
 
-    model_name = pick_available_model(client)
-    print("USING_MODEL:", model_name)
+    candidates = discover_candidate_models(client)
+    last_error = None
 
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.4,
-        ),
-    )
-    reply = getattr(response, "text", None)
-    if not reply:
-        raise RuntimeError("Gemini returned an empty response")
-    return reply.strip()
+    for model_name in candidates:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.4,
+                ),
+            )
+            reply = getattr(response, "text", None)
+            if reply and reply.strip():
+                _working_model = model_name
+                print("SUCCESS_WITH_MODEL:", model_name)
+                return reply.strip()
+        except Exception as e:
+            last_error = e
+            print(f"MODEL_ATTEMPT_FAILED [{model_name}]:", repr(e))
+            if _working_model == model_name:
+                _working_model = None
+
+    raise RuntimeError(f"All candidate models failed. Last error: {repr(last_error)}")
 
 
 @app.route("/", methods=["GET"])
