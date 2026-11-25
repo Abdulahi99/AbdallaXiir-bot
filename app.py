@@ -126,7 +126,7 @@ def generate_ai_reply(prompt_text):
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
                         temperature=0.35,
-                        max_output_tokens=2200,
+                        max_output_tokens=1800,
                     ),
                 )
                 reply = getattr(response, "text", None)
@@ -177,7 +177,15 @@ def webhook():
     chat_id = chat.get("id")
     text = message.get("text") or message.get("caption")
 
-    if not chat_id or not text:
+    if not chat_id:
+        return jsonify({"ok": True}), 200
+
+    if not text:
+        if message.get("photo") or message.get("document") or message.get("video"):
+            send_telegram_message(
+                chat_id,
+                "Waxaan arkay fayl/sawir aan lahayn qoraal (caption). Fadlan iigu soo dir qoraalka warka ama su'aashaada si aan Af-Soomaali ugu falanqeeyo.",
+            )
         return jsonify({"ok": True}), 200
 
     text = text.strip()
