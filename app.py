@@ -28,22 +28,18 @@ def get_gemini_client():
 
 
 SYSTEM_INSTRUCTION = """
-Waxaad tahay caawiye AI ah oo aad u xirfad sareeya oo loogu talagalay bot-ka Telegram ee @AbdallaXiir_bot.
-Had iyo jeer ku jawaab Af-Soomaali cad, nidaamsan, oo saaxiibtinimo leh (haddii aan si gaar ah laguu weydiisan luqad kale).
+Waxaad tahay caawiye AI ah oo degdeg ah, cad, oo nidaamsan una shaqeeya @AbdallaXiir_bot.
+Had iyo jeer ku jawaab Af-Soomaali cad oo fudud in la akhriyo (haddii aan si gaar ah laguu weydiisan luqad kale).
+Ka dhig jawaabta mid kooban oo nuxur leh, kana fogow qoraalka aad u dheer ee aan loo baahnayn ilaa falanqayn qoto dheer lagaa codsado.
 
-Awoodahaaga asaasiga ah waa:
-1. Falanqaynta Suuqyada (Markets): Crypto, Stocks, Forex, Commodities, iyo Indices. U samee falanqayn nidaamsan (Trend, Key Levels, Support/Resistance, Scenarios).
-2. Wave Concept Trading: U falanqee suuqa adigoo adeegsanaya qaabka hirarka (Impulse waves 1-2-3-4-5 iyo Corrective waves A-B-C). Si cad ugu sheeg:
-   - Qaabka hirka (Wave count / structure) iyo kalsoonida (probability).
-   - Aagga gelitaanka (Entry zone) iyo sababta.
-   - Meelaha ka bixidda (Take Profit 1, TP2, ama exit signal).
-   - Meesha ilaalinta / joojinta khasaaraha (Stop Loss / invalidation level).
-   - Xusuusin gaaban oo maareynta khatarta (risk management) ah.
-3. Fulinta Trade-ka (Trade Execution): Haddii isticmaaluhu dalbado in trade la galo ama la xiro, u diyaari "Trade Execution Plan / Order Ticket" oo faahfaahsan (Pair/Asset, Side: Long/Short/Buy/Sell, Entry, Stop Loss, Take Profit, Risk). Haddii uusan xirneyn API-ga exchange/broker-ka, u sheeg si cad in uu yahay qorshe order oo diyaar u ah in lagu xiro API-ga exchange-ka.
-4. Baarista Coin-nada Mustaqbalka (Crypto Research & Watchlist): Marka la weydiiyo coin-no kici kara ama meel fiican gaari kara mustaqbalka, sharrax mashaariicda leh utility dhab ah, qodobbada kor u qaadi kara (catalysts, liquidity, adoption), iyo khataraha (volatility, dilution/unlocks, regulation), adigoo ku daraya xusuusin khatarta maalgashiga.
-5. Luqadaha Swedish iyo English: U fasir oo ugu sharrax Af-Soomaali si fudud oo dhab ah, adigoo bixinaya tusaalooyin isticmaalka maalinlaha ah.
-6. Wararka (News) oo Af-Soomaali ah: Marka la weydiiyo warar (suuqyada, caalamka, Sweden, ama tignoolajiyada), ugu qor Af-Soomaali cad oo nidaamsan, adigoo kala saaraya dulmar kooban, saamaynta suurtagalka ah, iyo xogta la xaqiijiyay.
-7. Caawinta Guud: Wax kasta oo farsamo, waxbarasho, qorshayn, ama xallin dhibaato ah, si buuxda uga caawi.
+Awoodahaaga:
+1. Falanqaynta Suuqyada (Crypto, Stocks, Forex, Commodities, Indices): Trend, Support/Resistance, iyo xaaladaha suurtagalka ah.
+2. Wave Concept Trading: Wave structure, Entry zone, Take Profit (TP1/TP2), Stop Loss, iyo risk management kooban.
+3. Fulinta Trade-ka: Order ticket cad (Pair, Side, Entry, SL, TP, Risk) iyo xusuusin haddii API-ga exchange-ka uusan xirnayn.
+4. Baarista Coin-nada Mustaqbalka: Utility, catalysts, khataraha (volatility/unlocks/regulation), iyo xusuusin khatar maalgashi.
+5. Luqadaha Swedish iyo English: Fasiraad iyo sharrax Af-Soomaali ah oo leh tusaalo maalinle ah.
+6. Wararka (News): Dulmar kooban oo Af-Soomaali ah, saamaynta suuqa/arrinta, iyo kala saaridda xogta la xaqiijiyay.
+7. Caawinta Guud: Farsamo, waxbarasho, iyo xallin dhibaato si toos ah.
 """
 
 
@@ -57,7 +53,7 @@ def send_telegram_message(chat_id, text):
         part = text[i : i + chunk_size]
         payload = {"chat_id": chat_id, "text": part}
         try:
-            resp = requests.post(url, json=payload, timeout=25)
+            resp = requests.post(url, json=payload, timeout=20)
             print("Telegram sendMessage status:", resp.status_code, resp.text)
         except Exception as e:
             print("TELEGRAM_SEND_ERROR:", repr(e))
@@ -76,15 +72,15 @@ def discover_candidate_models(client):
     if _working_model:
         candidates.append(_working_model)
 
-    defaults = [
-        "gemini-2.0-flash",
+    fast_defaults = [
         "gemini-2.0-flash-lite",
-        "gemini-flash-latest",
         "gemini-flash-lite-latest",
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
+        "gemini-1.5-flash-8b",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
     ]
-    for d in defaults:
+    for d in fast_defaults:
         if d not in candidates:
             candidates.append(d)
 
@@ -94,7 +90,17 @@ def discover_candidate_models(client):
             clean_name = raw_name.replace("models/", "").strip()
             if not clean_name:
                 continue
-            blocked_words = ("embedding", "imagen", "veo", "aqa", "bis", "tts", "live", "audio")
+            blocked_words = (
+                "embedding",
+                "imagen",
+                "veo",
+                "aqa",
+                "bis",
+                "tts",
+                "live",
+                "audio",
+                "pro",
+            )
             if any(w in clean_name.lower() for w in blocked_words):
                 continue
             if "gemini" in clean_name.lower() and clean_name not in candidates:
@@ -124,7 +130,8 @@ def generate_ai_reply(user_text):
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
-                    temperature=0.4,
+                    temperature=0.35,
+                    max_output_tokens=900,
                 ),
             )
             reply = getattr(response, "text", None)
