@@ -1,4 +1,4 @@
-import os
+ import os
 import requests
 from flask import Flask, request, jsonify
 from google import genai
@@ -11,6 +11,7 @@ GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
 TRADE_EXECUTION_ENABLED = (os.environ.get("TRADE_EXECUTION_ENABLED") or "false").lower() == "true"
 
 _client = None
+_cached_model = None
 
 
 def get_gemini_client():
@@ -65,14 +66,50 @@ def send_telegram_message(chat_id, text):
 
 
 def execute_trade_hook(command_text):
-    """
-    Placeholder hook for live exchange/broker API integration.
-    Enable TRADE_EXECUTION_ENABLED=true and wire your exchange SDK/REST API here
-    only when you are ready for automated order placement.
-    """
     if not TRADE_EXECUTION_ENABLED:
         return None
     return f"[Trade Hook Active] Fariinta order-ka waa la diiwaangeliyay: {command_text}"
+
+
+def pick_available_model(client):
+    global _cached_model
+    if _cached_model:
+        return _cached_model
+
+    preferred = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+    ]
+
+    available_names = []
+    try:
+        for m in client.models.list():
+            name = getattr(m, "name", "") or ""
+            clean_name = name.replace("models/", "")
+            supported = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
+            if not supported or "generateContent" in supported or "generate_content" in supported:
+                if clean_name:
+                    available_names.append(clean_name)
+        print("AVAILABLE_MODELS:", available_names)
+    except Exception as e:
+        print("LIST_MODELS_ERROR:", repr(e))
+
+    for p in preferred:
+        if p in available_names:
+            _cached_model = p
+            return _cached_model
+
+    for name in available_names:
+        if "gemini" in name and "embedding" not in name and "imagen" not in name and "veo" not in name:
+            _cached_model = name
+            return _cached_model
+
+    _cached_model = "gemini-2.0-flash"
+    return _cached_model
 
 
 def generate_ai_reply(user_text):
@@ -83,8 +120,11 @@ def generate_ai_reply(user_text):
     if hook_note:
         prompt = f"{user_text}\n\n[Xogta Nidaamka: {hook_note}]"
 
+    model_name = pick_available_model(client)
+    print("USING_MODEL:", model_name)
+
     response = client.models.generate_content(
-        model="gemini-3.0-flash",
+        model=model_name,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
