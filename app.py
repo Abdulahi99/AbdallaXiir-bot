@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from flask import Flask, request, jsonify
 from google import genai
@@ -15,7 +16,7 @@ TRADE_EXECUTION_ENABLED = (
 ).strip().lower() == "true"
 
 _client = None
-_working_model = None
+_active_model = "gemini-3.5-flash-lite"
 
 
 def get_gemini_client():
@@ -28,18 +29,22 @@ def get_gemini_client():
 
 
 SYSTEM_INSTRUCTION = """
-Waxaad tahay caawiye AI ah oo degdeg ah, cad, oo nidaamsan una shaqeeya @AbdallaXiir_bot.
-Had iyo jeer ku jawaab Af-Soomaali cad oo fudud in la akhriyo (haddii aan si gaar ah laguu weydiisan luqad kale).
-Ka dhig jawaabta mid kooban oo nuxur leh, kana fogow qoraalka aad u dheer ee aan loo baahnayn ilaa falanqayn qoto dheer lagaa codsado.
+Waxaad tahay caawiye AI ah oo aad u caqli badan, xirfad sare leh, oo luqadaha si qoto dheer u yaqaanna una shaqeeya @AbdallaXiir_bot.
 
-Awoodahaaga:
-1. Falanqaynta Suuqyada (Crypto, Stocks, Forex, Commodities, Indices): Trend, Support/Resistance, iyo xaaladaha suurtagalka ah.
-2. Wave Concept Trading: Wave structure, Entry zone, Take Profit (TP1/TP2), Stop Loss, iyo risk management kooban.
-3. Fulinta Trade-ka: Order ticket cad (Pair, Side, Entry, SL, TP, Risk) iyo xusuusin haddii API-ga exchange-ka uusan xirnayn.
-4. Baarista Coin-nada Mustaqbalka: Utility, catalysts, khataraha (volatility/unlocks/regulation), iyo xusuusin khatar maalgashi.
-5. Luqadaha Swedish iyo English: Fasiraad iyo sharrax Af-Soomaali ah oo leh tusaalo maalinle ah.
-6. Wararka (News): Dulmar kooban oo Af-Soomaali ah, saamaynta suuqa/arrinta, iyo kala saaridda xogta la xaqiijiyay.
-7. Caawinta Guud: Farsamo, waxbarasho, iyo xallin dhibaato si toos ah.
+Xeerarka luqadda iyo qoraalka:
+- Had iyo jeer ku qor Af-Soomaali dabiici ah, cad, naxwe ahaan sax ah, oo leh xarrago iyo macne sugan — haddii isticmaaluhu si cad u codsado Swedish ama English, ugu jawaab luqaddaas si heer sare ah.
+- Markaad sharraxayso erayo Swedish ama English ah, u fasir si sax ah oo bixi tusaalooyin maalinle ah oo la fahmi karo.
+- Ha joojin ama ha kala goyn jawaabta bartamaha; mar walba dhammaystir falanqaynta, tixraacyada, iyo gunaanadka.
+- Ha isticmaalin calaamado Markdown oo dhiman (sida `**` aan xirnayn) ama qoraal isku qasan.
+
+Awoodahaaga qoto dheer:
+1. Falanqaynta Suuqyada (Crypto, Stocks, Forex, Commodities, Indices): Samee taxliil nidaamsan (Trend, Support/Resistance, Momentum, iyo xaaladaha kor iyo hoos).
+2. Wave Concept Trading: Falanqee Impulse (1-2-3-4-5) iyo Corrective (A-B-C) — sheeg Wave count/structure, Entry zone, Stop Loss, TP1/TP2, iyo maareynta khatarta.
+3. Baarista Coin-nada Mustaqbalka & Long-Term: Falanqee aasaaska mashruuca (utility, adoption, tokenomics/unlocks, catalysts), khataraha, iyo istaraatijiyadda soogalitaanka (sida DCA ama qaybsashada meelaha soo laabashada), adigoo mar walba xusaya in maalgashigu leeyahay khatar.
+4. Trade Execution Plan: Haddii la dalbado qorshe trade, qor Pair, Side, Entry, SL, TP, iyo Risk %, adigoo xusaya haddii API-ga exchange-ka uusan weli toos ugu xirnayn.
+5. Luqadaha (Af-Soomaali, Swedish, English): Turjumaad sax ah, sharrax naxwe/ereyo, iyo isbarbardhig macne oo caqli leh.
+6. Wararka & Arrinta Guud: Dulmar cad, saameynta dhacdada, iyo kala saaridda xogta la xaqiijiyay iyo arrimaha isbeddeli kara.
+7. Su'aalaha Guud, IT & Farsamada: Ka jawaab su'aal kasta si deggan, faahfaahsan, oo xallin leh.
 """
 
 
@@ -48,13 +53,22 @@ def send_telegram_message(chat_id, text):
         print("ERROR: Missing TELEGRAM_BOT_TOKEN or BOT_TOKEN environment variable")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    chunk_size = 4000
-    for i in range(0, len(text), chunk_size):
-        part = text[i : i + chunk_size]
-        payload = {"chat_id": chat_id, "text": part}
+    clean_text = (text or "").strip()
+    if not clean_text:
+        return
+
+    chunk_size = 3900
+    for i in range(0, len(clean_text), chunk_size):
+        part = clean_text[i : i + chunk_size]
+        payload = {
+            "chat_id": chat_id,
+            "text": part,
+            "disable_web_page_preview": True,
+        }
         try:
-            resp = requests.post(url, json=payload, timeout=20)
-            print("Telegram sendMessage status:", resp.status_code, resp.text)
+            resp = requests.post(url, json=payload, timeout=25)
+            if resp.status_code != 200:
+                print("Telegram sendMessage non-200:", resp.status_code, resp.text)
         except Exception as e:
             print("TELEGRAM_SEND_ERROR:", repr(e))
 
@@ -62,90 +76,82 @@ def send_telegram_message(chat_id, text):
 def execute_trade_hook(command_text):
     if not TRADE_EXECUTION_ENABLED:
         return None
-    return f"[Trade Hook Active] Fariinta order-ka waa la diiwaangeliyay: {command_text}"
+    return f"[Trade Hook Active] Order command logged: {command_text}"
 
 
-def discover_candidate_models(client):
-    global _working_model
-    candidates = []
-
-    if _working_model:
-        candidates.append(_working_model)
-
-    fast_defaults = [
-        "gemini-2.0-flash-lite",
-        "gemini-flash-lite-latest",
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-        "gemini-1.5-flash-8b",
-        "gemini-1.5-flash",
+def _build_model_queue(skip_models):
+    raw_candidates = [
+        _active_model,
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash-lite",
     ]
-    for d in fast_defaults:
-        if d not in candidates:
-            candidates.append(d)
+    queue = []
+    seen = set()
+    for m in raw_candidates:
+        if m and m not in seen and m not in skip_models:
+            seen.add(m)
+            queue.append(m)
+    return queue
 
-    try:
-        for m in client.models.list():
-            raw_name = getattr(m, "name", "") or ""
-            clean_name = raw_name.replace("models/", "").strip()
-            if not clean_name:
-                continue
-            blocked_words = (
-                "embedding",
-                "imagen",
-                "veo",
-                "aqa",
-                "bis",
-                "tts",
-                "live",
-                "audio",
-                "pro",
-            )
-            if any(w in clean_name.lower() for w in blocked_words):
-                continue
-            if "gemini" in clean_name.lower() and clean_name not in candidates:
-                candidates.append(clean_name)
-    except Exception as e:
-        print("LIST_MODELS_WARNING:", repr(e))
 
-    return candidates
+def _is_quota_or_not_found(err_text):
+    markers = (
+        "404",
+        "NOT_FOUND",
+        "429",
+        "QuotaFailure",
+        "RESOURCE_EXHAUSTED",
+        "no longer available",
+    )
+    return any(k in err_text for k in markers)
 
 
 def generate_ai_reply(user_text):
-    global _working_model
+    global _active_model
     client = get_gemini_client()
     hook_note = execute_trade_hook(user_text)
 
     prompt = user_text
     if hook_note:
-        prompt = f"{user_text}\n\n[Xogta Nidaamka: {hook_note}]"
+        prompt = f"{user_text}\n\n[System Note: {hook_note}]"
 
-    candidates = discover_candidate_models(client)
+    skip_models = set()
     last_error = None
 
-    for model_name in candidates:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    temperature=0.35,
-                    max_output_tokens=900,
-                ),
-            )
-            reply = getattr(response, "text", None)
-            if reply and reply.strip():
-                _working_model = model_name
-                print("SUCCESS_WITH_MODEL:", model_name)
-                return reply.strip()
-        except Exception as e:
-            last_error = e
-            print(f"MODEL_ATTEMPT_FAILED [{model_name}]:", repr(e))
-            if _working_model == model_name:
-                _working_model = None
+    for _ in range(2):
+        queue = _build_model_queue(skip_models)
+        if not queue:
+            break
 
-    raise RuntimeError(f"All candidate models failed. Last error: {repr(last_error)}")
+        for model_name in queue:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        temperature=0.35,
+                        max_output_tokens=2200,
+                    ),
+                )
+                reply = getattr(response, "text", None)
+                if reply and reply.strip():
+                    _active_model = model_name
+                    return reply.strip()
+            except Exception as e:
+                last_error = e
+                err_str = repr(e)
+                print(f"MODEL_ATTEMPT_FAILED [{model_name}]:", err_str)
+                if _is_quota_or_not_found(err_str):
+                    skip_models.add(model_name)
+                if _active_model == model_name:
+                    _active_model = "gemini-3.5-flash-lite"
+
+        if skip_models and len(skip_models) >= 3:
+            time.sleep(0.6)
+
+    raise RuntimeError(f"All models failed. Last error: {repr(last_error)}")
 
 
 @app.route("/", methods=["GET"])
@@ -168,14 +174,14 @@ def webhook():
     if text == "/start":
         send_telegram_message(
             chat_id,
-            "Ku soo dhawoow @AbdallaXiir_bot! Waxaan kaa caawin karaa:\n"
+            "Ku soo dhawoow @AbdallaXiir_bot! Waxaan kaa caawin karaa wax kasta oo nidaamsan oo dhameystiran:\n"
             "• Falanqaynta Crypto, Stocks, Forex & suuqyada kale\n"
-            "• Wave Concept Trading (Entry, Take Profit & Stop Loss)\n"
-            "• Baarista coin-nada mustaqbalka leh\n"
-            "• Luqadaha Swedish iyo English oo lagu sharraxayo Af-Soomaali\n"
-            "• Wararka (News) oo Af-Soomaali nidaamsan ah\n"
-            "• Su'aalaha guud iyo qorshaynta trade-ka\n\n"
-            "I weydii waxa aad rabto hadda!",
+            "• Wave Concept Trading (Entry, Stop Loss & TP1/TP2)\n"
+            "• Baarista coin-nada mustaqbalka leh & istaraatijiyadda long-term\n"
+            "• Luqadaha Af-Soomaali, Swedish & English oo si qoto dheer loo sharraxo\n"
+            "• Wararka (News) oo nidaamsan\n"
+            "• Su'aalaha guud, IT/farsamada, iyo xallinta dhibaatooyinka\n\n"
+            "I weydii su'aashaada hadda!",
         )
         return jsonify({"ok": True}), 200
 
@@ -186,7 +192,7 @@ def webhook():
         print("GEMINI_ERROR:", repr(e))
         send_telegram_message(
             chat_id,
-            "Waan ka xunahay, AI-ga ayaa hadda culeys ku jira ama cilad ku meel gaar ah ayaa dhacday. Fadlan daqiiqad yar sug ka dibna mar kale isku day.",
+            "Waan ka xunahay, nidaamka AI-ga ayaa hadda la kulmay cilad ku meel gaar ah ama xaddid isticmaal. Fadlan daqiiqad yar sug ka dibna mar kale isku day.",
         )
 
     return jsonify({"ok": True}), 200
